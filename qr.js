@@ -1,97 +1,280 @@
-const PastebinAPI = require('pastebin-js'),
-pastebin = new PastebinAPI('EMWTMkQAVfJa9kM-MRUrxd5Oku1U7pgL')
-const {makeid} = require('./id');
+const { makeid } = require('./id');
 const QRCode = require('qrcode');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-let router = express.Router()
-const pino = require("pino");
-const {
-	default: Bmb_Tech,
-	useMultiFileAuthState,
-	jidNormalizedUser,
-	Browsers,
-	delay,
-	makeInMemoryStore,
-} = require("@whiskeysockets/baileys");
+const pino = require('pino');
 
-function removeFile(FilePath) {
-	if (!fs.existsSync(FilePath)) return false;
-	fs.rmSync(FilePath, {
-		recursive: true,
-		force: true
-	})
-};
 const {
-	readFile
-} = require("node:fs/promises")
+    default: Toxic_Tech,
+    useMultiFileAuthState,
+    Browsers,
+    delay,
+    makeCacheableSignalKeyStore,
+    fetchLatestBaileysVersion,
+    generateWAMessageFromContent,
+    proto
+} = require('@whiskeysockets/baileys');
+
+const router = express.Router();
+const tempRoot = path.join(__dirname, 'temp');
+
+if (!fs.existsSync(tempRoot)) {
+    fs.mkdirSync(tempRoot, { recursive: true });
+}
+
+function removeFile(filePath) {
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.rmSync(filePath, { recursive: true, force: true });
+        }
+    } catch {}
+}
+
 router.get('/', async (req, res) => {
-	const id = makeid();
-	async function BMB_TECH_QR_CODE() {
-		const {
-			state,
-			saveCreds
-		} = await useMultiFileAuthState('./temp/' + id)
-		try {
-			let Qr_Code_By_Bmb_Tech = Bmb_Tech({
-				auth: state,
-				printQRInTerminal: false,
-				logger: pino({
-					level: "silent"
-				}),
-				browser: Browsers.macOS("Desktop"),
-			});
+    const id = makeid();
+    const sessionDir = path.join(tempRoot, id);
 
-			Qr_Code_By_Bmb_Tech.ev.on('creds.update', saveCreds)
-			Qr_Code_By_Bmb_Tech.ev.on("connection.update", async (s) => {
-				const {
-					connection,
-					lastDisconnect,
-					qr
-				} = s;
-				if (qr) await res.end(await QRCode.toBuffer(qr));
-				if (connection == "open") {
-					await delay(5000);
-					let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-					await delay(800);
-				   let b64data = Buffer.from(data).toString('base64');
-				   let session = await Qr_Code_By_Bmb_Tech.sendMessage(Qr_Code_By_Bmb_Tech.user.id, { text: '' + b64data });
-	
-				   let BMB_TECH_TEXT = `
-THANKYOU FOR CHOOSING B.M.B-TECH
-🔙💚☯️♡𝐃𝐑𝐈𝐏 𝐅𝐀𝐌𝐈𝐋𝐘  .. 🤼 💫
-  ╭━━━━❤━━━━╮
-  💥VERY ACTIVE 🙅
-      🕊️𝐂𝐥𝐞𝐚𝐧 𝐚𝐥𝐰𝐚𝐲𝐬🍏
-  ╰━━━━🥺━━━━╯💚🔙
-❒ 𝐖𝐚𝐂𝐡𝐚𝐧𝐧𝐞𝐥: _https://whatsapp.com/channel/0029VawO6hgF6sn7k3SuVU3z_
-║ 
-follow our channel to learn how to deploy..
-Repository available at our channel`
-	 await Qr_Code_By_Bmb_Tech.sendMessage(Qr_Code_By_Bmb_Tech.user.id,{text:BMB_TECH_TEXT},{quoted:session})
+    let responseSent = false;
+    let finished     = false;
+    let reconnecting = false;
+    let sock         = null;
 
+    function cleanupSync() {
+        try {
+            if (sock?.ev) {
+                try { sock.ev.removeAllListeners(); } catch {}
+            }
+            if (sock?.ws) {
+                try { sock.ws.close(); } catch {}
+            }
+        } catch {}
+        removeFile(sessionDir);
+    }
 
+    async function fail(message, status) {
+        if (finished) return;
+        finished = true;
+        cleanupSync();
+        if (!responseSent && !res.headersSent) {
+            res.status(status || 500).json({ code: message });
+            responseSent = true;
+        }
+    }
 
-					await delay(100);
-					await Qr_Code_By_Bmb_Tech.ws.close();
-					return await removeFile("temp/" + id);
-				} else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
-					await delay(10000);
-					BMB_TECH_QR_CODE();
-				}
-			});
-		} catch (err) {
-			if (!res.headersSent) {
-				await res.json({
-					code: "Service is Currently Unavailable"
-				});
-			}
-			console.log(err);
-			await removeFile("temp/" + id);
-		}
-	}
-	return await BMB_TECH_QR_CODE()
+    async function startSocket() {
+        if (finished) return;
+        try {
+            if (!fs.existsSync(sessionDir)) {
+                fs.mkdirSync(sessionDir, { recursive: true });
+            }
+
+            const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+            const { version } = await fetchLatestBaileysVersion();
+
+            if (sock?.ev) {
+                try { sock.ev.removeAllListeners('connection.update'); } catch {}
+                try { sock.ev.removeAllListeners('creds.update'); } catch {}
+            }
+
+            sock = Toxic_Tech({
+                version,
+                auth: {
+                    creds: state.creds,
+                    keys: makeCacheableSignalKeyStore(
+                        state.keys,
+                        pino({ level: 'silent' })
+                    ),
+                },
+                printQRInTerminal:              false,
+                logger:                         pino({ level: 'silent' }),
+                browser:                        Browsers.macOS('Chrome'),
+                syncFullHistory:                false,
+                connectTimeoutMs:               120000,
+                keepAliveIntervalMs:            10000,
+                retryRequestDelayMs:            2000,
+                maxRetries:                     10,
+                generateHighQualityLinkPreview: true,
+                markOnlineOnConnect:            false,
+            });
+
+            sock.ev.on('creds.update', saveCreds);
+
+            sock.ev.on('connection.update', async (update) => {
+                try {
+                    const { connection, lastDisconnect, qr } = update;
+
+                    if (finished) return;
+
+                    if (qr && !responseSent && !res.headersSent) {
+                        try {
+                            const buf = await QRCode.toBuffer(qr, {
+                                type: 'png', width: 300, margin: 2,
+                                color: { dark: '#000000', light: '#ffffff' },
+                                errorCorrectionLevel: 'M',
+                            });
+                            res.setHeader('Content-Type', 'image/png');
+                            res.setHeader('Cache-Control', 'no-store');
+                            res.end(buf);
+                        } catch {
+                            if (!res.headersSent) res.json({ qr });
+                        }
+                        responseSent = true;
+                    }
+
+                    if (connection === 'open') {
+                        finished = true;
+
+                        try { await sock.newsletterFollow('120363382023564830@newsletter'); } catch {}
+
+                        const userJid = sock.user.id.includes(':')
+                            ? sock.user.id.split(':')[0] + '@s.whatsapp.net'
+                            : sock.user.id;
+
+                        try {
+                            await sock.sendMessage(userJid, {
+                                text: `Hello! 👋 Session load waiting....🔃`
+                            });
+                        } catch {}
+
+                        await delay(5000);
+                        await saveCreds();
+                        await delay(2000);
+
+                        const credsPath = path.join(sessionDir, 'creds.json');
+                        let sessionData = null;
+                        let attempts = 0;
+                        const maxAttempts = 10;
+
+                        while (attempts < maxAttempts && !sessionData) {
+                            try {
+                                if (fs.existsSync(credsPath)) {
+                                    const data = fs.readFileSync(credsPath);
+                                    if (data && data.length > 100) {
+                                        sessionData = data;
+                                        console.log(`✅ Session data found (${data.length} bytes) on attempt ${attempts + 1}`);
+                                        break;
+                                    } else {
+                                        console.log(`⚠️ Session file too small: ${data?.length || 0} bytes`);
+                                    }
+                                } else {
+                                    console.log(`⚠️ Session file not found yet, attempt \( {attempts + 1}/ \){maxAttempts}`);
+                                }
+                                await delay(3000);
+                                attempts++;
+                            } catch (readError) {
+                                console.error("Read attempt error:", readError);
+                                await delay(3000);
+                                attempts++;
+                            }
+                        }
+
+                        if (!sessionData) {
+                            console.error("Failed to read session data after all attempts");
+                            try { await sock.sendMessage(userJid, { text: "Failed to generate session. Please try again." }); } catch {}
+                            cleanupSync();
+                            return;
+                        }
+
+                        const b64data = Buffer.from(sessionData).toString('base64');
+
+                        try {
+                            console.log(' Sending session data to user...');
+                            const sessionMsg = await generateWAMessageFromContent(userJid, proto.Message.fromObject({
+                                interactiveMessage: {
+                                    body: { text: b64data },
+                                    footer: { text: '' },
+                                    nativeFlowMessage: {
+                                        messageVersion: 1,
+                                        buttons: [{
+                                            name: 'cta_copy',
+                                            buttonParamsJson: JSON.stringify({ display_text: 'Copy Session id', copy_code: b64data })
+                                        }],
+                                        messageParamsJson: ''
+                                    }
+                                }
+                            }), { userJid: sock.user.id });
+
+                            const sentSession = await sock.relayMessage(userJid, sessionMsg.message, { messageId: sessionMsg.key.id });
+
+                            await delay(3000);
+
+                            await sock.sendMessage(
+                                userJid,
+                                {
+                                    text: `*🎉 SESSION GENERATED SUCCESSFULLY! ✅*
+
+*💪 Empowering Your Experience with bmb tech Bot*
+
+*👥 Join to group free chat enjoy with friends🤙*
+🖇️ https://chat.whatsapp.com/BKoqNbYGCkK5apBNP0nzI3
+
+*🌟 Show your support by giving our repo a star! 🌟*
+🔗 https://github.com/Dev-bmbtech/BMB-TECH
+
+*💭 Need help? Join our support channel:*
+📢 💬
+https://whatsapp.com/channel/0029VawO6hgF6sn7k3SuVU3z
+
+*📚 Learn & Explore More with Tutorials:*
+🪄 Bmb Tech Website https://bmbtech.zone.id
+
+*🥀 Powered by dev bmb Bot & bmb tech Inc 🥀*
+*Together, we build the future of automation! 🚀*`
+                                },
+                                { quoted: sentSession }
+                            );
+                        } catch (sendError) {
+                            console.error("Error sending session:", sendError);
+                            try {
+                                const fallback = await sock.sendMessage(userJid, { text: b64data });
+                                await sock.sendMessage(userJid, { text: `SESSION CONNECTED✔️` }, { quoted: fallback });
+                            } catch {}
+                        }
+
+                        await delay(1000);
+                        cleanupSync();
+                        return;
+                    }
+
+                    if (connection === 'close') {
+                        if (finished) return;
+
+                        const statusCode =
+                            lastDisconnect?.error?.output?.statusCode ||
+                            lastDisconnect?.error?.statusCode;
+
+                        if (statusCode === 401) {
+                            return await fail('Logged out. Please try again.');
+                        }
+
+                        if (!reconnecting) {
+                            reconnecting = true;
+                            await delay(statusCode === 515 ? 1000 : 3000);
+                            reconnecting = false;
+                            return startSocket();
+                        }
+                    }
+
+                } catch (err) {
+                    if (!finished) await fail('Service is Currently Unavailable. Please try again.');
+                }
+            });
+
+        } catch (err) {
+            if (!finished) await fail('Service is Currently Unavailable. Please try again.');
+        }
+    }
+
+    const globalTimeout = setTimeout(function () {
+        if (!finished) fail('Request timed out. Please try again.');
+    }, 420000);
+
+    try {
+        await startSocket();
+    } catch {}
+
+    return;
 });
-module.exports = router
-			
+
+module.exports = router;
